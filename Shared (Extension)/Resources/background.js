@@ -291,6 +291,7 @@ var ua = {},
     defaultKagiSearchTemplate = "https://kagi.com/search?q=%s",
     kagiSearchTemplate = defaultKagiSearchTemplate,
     kagiPrivateSearchTemplate = "",
+    flagCheckedLocalStorageForPrivateSessionLink = false,
     customURLMode = 0,
     customURLList = [],
     regularTabIds = [],
@@ -334,7 +335,19 @@ function rewriteQueryURL(a, b) {
 }
 var tk = 0;
 function checkForSearch(a) {
-    requestPrivateSessionLinkFromApp();
+    requestPrivateSessionLinkFromApp(); // Always do a quick check to make sure we're synced. Background scripts may be killed and not update before a search is run.
+    if (!flagCheckedLocalStorageForPrivateSessionLink) {
+        console.log("[checkForSearch] Search query started before local private session link was fetched");
+        checkLocalStorageForPrivateSessionLink(function(){
+            console.log("[checkForSearch] Fetched local private session link as part of first search query during current browsing session");
+            _checkForSearch(a);
+        });
+    } else {
+        _checkForSearch(a);
+    }
+}
+
+function _checkForSearch(a) {
     if (-1 == a.parentFrameId && 0 < a.tabId) {
         var b = Date.now(),
             c = a.url,
@@ -418,11 +431,6 @@ function updateEngine(engine) {
             return filters;
         })
     };
-//    var permissionsToRequest = {
-//        permissions: ["webNavigation"],
-//        origins: Object.keys(newFilterUrls).map((host) => ("*://" + host + "/*"))
-//    }
-//    browser.permissions.request(permissionsToRequest);
     browser.webNavigation.onBeforeNavigate.removeListener(checkForSearch);
     browser.webNavigation.onBeforeNavigate.addListener(checkForSearch, newFilter);
 }
@@ -439,6 +447,17 @@ function updatePrivateSessionLink(link) {
         kagiPrivateSearchTemplate = "";
         browser.storage.local.set({ kagiPrivateSessionLink: "" });
     }
+}
+
+function checkLocalStorageForPrivateSessionLink(callback) {
+    browser.storage.local.get("kagiPrivateSessionLink", function(value) {
+        var link = value.kagiPrivateSessionLink;
+        if (typeof(link) !== "undefined") {
+            updatePrivateSessionLink(link);
+        }
+        flagCheckedLocalStorageForPrivateSessionLink = true;
+        callback();
+    });
 }
 
 function requestCurrentEngineFromApp() {
@@ -499,11 +518,8 @@ browser.runtime.onInstalled.addListener(function(details){
 
 // Check for a private session link at startup so that the first search
 // in a private window or tab doesn't fail
-browser.storage.local.get("kagiPrivateSessionLink", function(value) {
-    var link = value.kagiPrivateSessionLink;
-    if (typeof(link) !== "undefined") {
-        updatePrivateSessionLink(link);
-    }
+checkLocalStorageForPrivateSessionLink(function(){
+    console.log("Finished startup check for local private session link");
 });
 
 // Checks every 5 seconds for a new engine. There's no other way to get new
